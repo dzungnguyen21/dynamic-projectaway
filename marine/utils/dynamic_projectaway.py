@@ -155,25 +155,31 @@ class DynamicProjectAway(LogitsProcessor):
     def _get_llama_layers(self) -> torch.nn.ModuleList:
         """Return the list of LlamaDecoderLayer modules from the LLaVA backbone.
 
-        HF LLaVA structure (llava-hf/llava-1.5-7b-hf):
-          LlavaForConditionalGeneration
-            .model  (LlavaModel)
-              .language_model  (LlamaForCausalLM)
-                .model  (LlamaModel)
-                  .layers  ← target
-
-        Original LLaVA repo structure:
-          model.language_model.model.layers
+        Tries all known HF LLaVA and original LLaVA repo structures in order:
+          1. model.model.language_model.layers          (HF: language_model = LlamaModel)
+          2. model.model.language_model.model.layers    (HF: language_model = LlamaForCausalLM)
+          3. model.model.layers                         (direct shortcut)
+          4. model.language_model.model.layers          (original LLaVA repo)
         """
         m = self.model
 
-        # Path 1 — HF llava-hf: model.model.language_model.model.layers
+        # Path 1 — HF llava-hf where language_model IS LlamaModel (most common)
         try:
-            return m.model.language_model.model.layers
+            layers = m.model.language_model.layers
+            if isinstance(layers, torch.nn.ModuleList):
+                return layers
         except AttributeError:
             pass
 
-        # Path 2 — Direct shortcut sometimes present: model.model.layers
+        # Path 2 — HF llava-hf where language_model is LlamaForCausalLM
+        try:
+            layers = m.model.language_model.model.layers
+            if isinstance(layers, torch.nn.ModuleList):
+                return layers
+        except AttributeError:
+            pass
+
+        # Path 3 — Direct shortcut
         try:
             layers = m.model.layers
             if isinstance(layers, torch.nn.ModuleList):
@@ -181,18 +187,20 @@ class DynamicProjectAway(LogitsProcessor):
         except AttributeError:
             pass
 
-        # Path 3 — Original LLaVA repo: model.language_model.model.layers
+        # Path 4 — Original LLaVA repo
         try:
-            return m.language_model.model.layers
+            layers = m.language_model.model.layers
+            if isinstance(layers, torch.nn.ModuleList):
+                return layers
         except AttributeError:
             pass
 
+        sub = list(m.model._modules.keys()) if hasattr(m, "model") else "N/A"
         raise AttributeError(
             "[DynamicProjectAway] Cannot find transformer layers. "
-            "Tried: model.model.language_model.model.layers, "
-            "model.model.layers, model.language_model.model.layers. "
-            f"model.model submodules: {list(m.model._modules.keys()) if hasattr(m, 'model') else 'N/A'}"
+            f"model.model submodules: {sub}"
         )
+
 
 
     def _identify_image_token_positions(
