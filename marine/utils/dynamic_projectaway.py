@@ -155,21 +155,45 @@ class DynamicProjectAway(LogitsProcessor):
     def _get_llama_layers(self) -> torch.nn.ModuleList:
         """Return the list of LlamaDecoderLayer modules from the LLaVA backbone.
 
-        Supports both model structures:
-          - HuggingFace LLaVA (llava-hf):  model.model.layers
-          - Original LLaVA repo:            model.language_model.model.layers
+        HF LLaVA structure (llava-hf/llava-1.5-7b-hf):
+          LlavaForConditionalGeneration
+            .model  (LlavaModel)
+              .language_model  (LlamaForCausalLM)
+                .model  (LlamaModel)
+                  .layers  ← target
+
+        Original LLaVA repo structure:
+          model.language_model.model.layers
         """
-        # HF LLaVA: LlavaForConditionalGeneration → .model (LlavaModel) → .layers
-        if hasattr(self.model, "model") and hasattr(self.model.model, "layers"):
-            return self.model.model.layers
-        # Original LLaVA repo structure
-        if hasattr(self.model, "language_model"):
-            return self.model.language_model.model.layers
+        m = self.model
+
+        # Path 1 — HF llava-hf: model.model.language_model.model.layers
+        try:
+            return m.model.language_model.model.layers
+        except AttributeError:
+            pass
+
+        # Path 2 — Direct shortcut sometimes present: model.model.layers
+        try:
+            layers = m.model.layers
+            if isinstance(layers, torch.nn.ModuleList):
+                return layers
+        except AttributeError:
+            pass
+
+        # Path 3 — Original LLaVA repo: model.language_model.model.layers
+        try:
+            return m.language_model.model.layers
+        except AttributeError:
+            pass
+
         raise AttributeError(
             "[DynamicProjectAway] Cannot find transformer layers. "
-            "Expected model.model.layers or model.language_model.model.layers. "
-            f"Top-level model attributes: {list(self.model._modules.keys())}"
+            "Tried: model.model.language_model.model.layers, "
+            "model.model.layers, model.language_model.model.layers. "
+            f"model.model submodules: {list(m.model._modules.keys()) if hasattr(m, 'model') else 'N/A'}"
         )
+
 
     def _identify_image_token_positions(
         self, input_ids: torch.Tensor
