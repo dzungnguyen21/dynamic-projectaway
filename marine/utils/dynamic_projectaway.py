@@ -353,6 +353,29 @@ class DynamicProjectAway(LogitsProcessor):
     # Shared Computation: Targeted Hook Trick
     # =========================================================================
 
+    def _get_head_config(self, module) -> Tuple[int, int, int]:
+        """
+        Safely retrieve number of heads and head dimension.
+        Handles different transformers versions where these attributes
+        might be on the module or on its config.
+        """
+        # Try finding config on module, else fallback to model config
+        config = getattr(module, "config", getattr(self.model, "config", getattr(self.model, "language_model", self.model).config))
+        
+        nH = getattr(module, "num_heads", getattr(config, "num_attention_heads", None))
+        if nH is None:
+            raise AttributeError("[DynamicProjectAway] Could not find num_heads or num_attention_heads")
+            
+        nKV = getattr(module, "num_key_value_heads", getattr(config, "num_key_value_heads", nH))
+        
+        D = getattr(module, "head_dim", None)
+        if D is None:
+            hidden_size = getattr(config, "hidden_size", nH * 128)
+            D = hidden_size // nH
+            
+        return nH, nKV, D
+
+
     def _compute_img_attention(
         self,
         module,
@@ -384,9 +407,7 @@ class DynamicProjectAway(LogitsProcessor):
 
         pkv      = self._storage["pre_pkv"].get(layer_idx)
         bsz, seq_len, _ = hidden.shape
-        nH       = module.num_heads
-        nKV      = module.num_key_value_heads
-        D        = module.head_dim
+        nH, nKV, D = self._get_head_config(module)
 
         with torch.no_grad():
             # Query: last token only  →  [B, 1, nH·D]
@@ -556,9 +577,7 @@ class DynamicProjectAway(LogitsProcessor):
                 return output
 
             attn_out = output[0]    # [B, S, hidden_dim]
-            nH  = module.num_heads
-            nKV = module.num_key_value_heads
-            D   = module.head_dim
+            nH, nKV, D = self._get_head_config(module)
             pkv = storage["pre_pkv"].get(layer_idx)
 
             with torch.no_grad():
@@ -655,9 +674,7 @@ class DynamicProjectAway(LogitsProcessor):
 
             attn_out = output[0]    # [B, S, hidden_dim]
             bsz, seq_len, _ = hidden.shape
-            nH  = module.num_heads
-            nKV = module.num_key_value_heads
-            D   = module.head_dim
+            nH, nKV, D = self._get_head_config(module)
             pkv = storage["pre_pkv"].get(layer_idx)
 
             # ---- A. Always update VAR proxy ----
