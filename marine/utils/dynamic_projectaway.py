@@ -257,8 +257,9 @@ class DynamicProjectAway(LogitsProcessor):
 
         def make_capture_hook(layer_idx: int):
             def hook(module, input_args, output):
-                hs              = output[0].detach()         # [B, S, D]
-                mean_hs         = hs.mean(dim=[0, 1])        # [D]
+                hs = output[0].detach()                      # Typically [B, S, D] or [N, D]
+                # Reshape to [N, D] to safely average over all tokens regardless of padding structure
+                mean_hs = hs.reshape(-1, hs.size(-1)).mean(dim=0)
                 captured[layer_idx] = F.normalize(mean_hs, dim=0).clone()
             return hook
 
@@ -759,12 +760,13 @@ class DynamicProjectAway(LogitsProcessor):
             if not self.intervention_active or v is None:
                 return output
 
-            hs    = output[0]                                    # [B, S, D]
-            v_dev = v.to(hs.device)                              # move to same device
+            hs    = output[0]                                    # [B, S, D] or [N, D]
+            v_dev = v.to(hs.device)                              # [D]
 
             # h_new = h − (h · v) * v
-            proj_coeff   = (hs @ v_dev).unsqueeze(-1)            # [B, S, 1]
-            hs_projected  = hs - proj_coeff * v_dev.unsqueeze(0).unsqueeze(0)
+            # Use unsqueeze to allow safe broadcasting for ANY valid shape structure
+            proj_coeff    = (hs @ v_dev).unsqueeze(-1)           # [B, S, 1] or [N, 1]
+            hs_projected  = hs - proj_coeff * v_dev              # v_dev broadcasts to fit prefix dims seamlessly
 
             return (hs_projected,) + output[1:]
 
