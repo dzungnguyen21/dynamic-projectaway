@@ -13,7 +13,8 @@ ENV/
 dist/
 build/
 
-
+# Data and generated outputs (should not be committed)
 data/coco/
+output/
 *.cache/
-*.ckpt
+*.ckpt
