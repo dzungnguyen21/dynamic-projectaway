@@ -6,6 +6,7 @@ import shortuuid
 
 from torch.utils.data import DataLoader
 from transformers import LogitsProcessorList
+from tqdm.auto import tqdm
 
 from marine.utils.utils import get_chunk, get_answers_file_name, get_model_name_from_path
 from marine.utils.utils_dataset import COCOEvalDataset, custom_collate_fn
@@ -56,8 +57,15 @@ def eval_model(args):
     eval_dataloader = DataLoader(
         dataset, batch_size=args.batch_size, shuffle=False, collate_fn=custom_collate_fn)
 
+    total_batches = len(eval_dataloader)
+    total_samples = len(dataset)
+
     # generate
-    for prompts, question_ids, img_ids, input_ids, guidance_ids, images, guidance_images, attention_masks, guidance_attention_masks in eval_dataloader:
+    pbar = tqdm(eval_dataloader, total=total_batches,
+                desc=f"Generating [gs={args.guidance_strength}]",
+                unit="batch", dynamic_ncols=True)
+    samples_done = 0
+    for prompts, question_ids, img_ids, input_ids, guidance_ids, images, guidance_images, attention_masks, guidance_attention_masks in pbar:
         
         with torch.inference_mode():
             if args.guidance_strength == 0:
@@ -128,11 +136,13 @@ def eval_model(args):
         decoded_outputs = tokenizer.batch_decode(
             output_ids[:, input_token_len:], skip_special_tokens=True)
 
+        samples_done += len(decoded_outputs)
+        pbar.set_postfix({"samples": f"{samples_done}/{total_samples}"})
+
         for i, output in enumerate(decoded_outputs):
 
             # Process each output
             output = output.strip()
-            print(f"{question_ids[i]}: {output}")
 
             # Generate answer ID and write to file
             ans_id = shortuuid.uuid()
