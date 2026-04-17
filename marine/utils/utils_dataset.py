@@ -6,8 +6,60 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from PIL import Image
 
-from llava.constants import DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
-from llava.conversation import conv_templates
+# ---------------------------------------------------------------------------
+# LLaVA constants & conversation templates — defined inline so we don't need
+# the original LLaVA repo installed as a package.
+# These match the values used by llava-hf/llava-1.5-7b-hf exactly.
+# ---------------------------------------------------------------------------
+DEFAULT_IMAGE_TOKEN = "<image>"
+DEFAULT_IM_START_TOKEN = "<im_start>"
+DEFAULT_IM_END_TOKEN = "<im_end>"
+
+
+class _SimpleConv:
+    """Minimal stand-in for llava.conversation.Conversation."""
+    def __init__(self, system, roles, sep, sep2=None):
+        self.system = system
+        self.roles = roles
+        self.sep = sep
+        self.sep2 = sep2 or sep
+        self.messages = []
+
+    def copy(self):
+        c = _SimpleConv(self.system, self.roles, self.sep, self.sep2)
+        c.messages = list(self.messages)
+        return c
+
+    def append_message(self, role, message):
+        self.messages.append((role, message))
+
+    def get_prompt(self):
+        # Vicuna v1 format: "USER: {prompt}\nASSISTANT:"
+        seps = [self.sep, self.sep2]
+        ret = self.system + self.sep
+        for i, (role, msg) in enumerate(self.messages):
+            if msg:
+                ret += role + ": " + msg + seps[i % 2]
+            else:
+                ret += role + ":"
+        return ret
+
+
+conv_templates = {
+    "vicuna_v1": _SimpleConv(
+        system="A chat between a curious user and an artificial intelligence assistant. "
+               "The assistant gives helpful, detailed, and polite answers to the user's questions.",
+        roles=("USER", "ASSISTANT"),
+        sep=" ",
+        sep2="</s>",
+    ),
+    "llava_v1": _SimpleConv(
+        system="A chat between a curious human and an artificial intelligence assistant. "
+               "The assistant gives helpful, detailed, and polite answers to the human's questions.",
+        roles=("Human", "Assistant"),
+        sep="###",
+    ),
+}
 
 
 class COCOEvalDataset(Dataset):
