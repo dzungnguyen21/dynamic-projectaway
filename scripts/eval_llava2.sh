@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-export PYTHONPATH=$PYTHONPATH:/path/to/your/llava2
+# Resolve the repo root relative to this script so it works on any machine
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH=$PYTHONPATH:$REPO_ROOT
 
 MODEL_NAME="llava2"
 MODEL_VERSION="llava-hf/llava-1.5-7b-hf"

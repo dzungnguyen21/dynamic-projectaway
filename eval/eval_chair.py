@@ -7,6 +7,13 @@ import tqdm
 import pickle
 from collections import defaultdict
 
+# Auto-download required NLTK resources
+for resource in ['punkt_tab', 'averaged_perceptron_tagger_eng']:
+    try:
+        nltk.data.find(f'tokenizers/{resource}' if 'punkt' in resource else f'taggers/{resource}')
+    except LookupError:
+        nltk.download(resource, quiet=True)
+
 
 # copied from: https://github.com/LisaAnne/Hallucination/blob/master/data/synonyms.txt
 synonyms_txt = '''
