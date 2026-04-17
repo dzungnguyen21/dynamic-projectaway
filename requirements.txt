@@ -9,3 +9,5 @@ matplotlib
 jsonlines
 pyyaml
 opencv-python
+shortuuid
+accelerate

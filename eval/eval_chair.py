@@ -467,7 +467,6 @@ def save_results(output, save_dir, cap_file):
 
     print(output['sentences'][0])
     print(output['overall_metrics'])
-    import pdb; pdb.set_trace()
     detailed_output_dict = {'overall_metrics': output['overall_metrics'],
                             'results': output['sentences']}
 
