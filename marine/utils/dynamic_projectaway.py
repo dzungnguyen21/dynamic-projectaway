@@ -153,8 +153,23 @@ class DynamicProjectAway(LogitsProcessor):
     # =========================================================================
 
     def _get_llama_layers(self) -> torch.nn.ModuleList:
-        """Return the list of LlamaDecoderLayer modules from the LLaVA backbone."""
-        return self.model.language_model.model.layers
+        """Return the list of LlamaDecoderLayer modules from the LLaVA backbone.
+
+        Supports both model structures:
+          - HuggingFace LLaVA (llava-hf):  model.model.layers
+          - Original LLaVA repo:            model.language_model.model.layers
+        """
+        # HF LLaVA: LlavaForConditionalGeneration → .model (LlavaModel) → .layers
+        if hasattr(self.model, "model") and hasattr(self.model.model, "layers"):
+            return self.model.model.layers
+        # Original LLaVA repo structure
+        if hasattr(self.model, "language_model"):
+            return self.model.language_model.model.layers
+        raise AttributeError(
+            "[DynamicProjectAway] Cannot find transformer layers. "
+            "Expected model.model.layers or model.language_model.model.layers. "
+            f"Top-level model attributes: {list(self.model._modules.keys())}"
+        )
 
     def _identify_image_token_positions(
         self, input_ids: torch.Tensor

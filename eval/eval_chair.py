@@ -447,7 +447,10 @@ def load_evaluator(args):
 # === Utilities ===
 def load_captions(path, id_key, text_key):
     with open(path) as f:
-        data = json.load(f) if path.endswith(".json") else [json.loads(l) for l in f]
+        data = json.load(f) if path.endswith(".json") else [json.loads(l) for l in f if l.strip()]
+
+    if not data:
+        raise ValueError(f"Caption file is empty: {path}")
 
     if id_key not in data[0]:
         raise KeyError(f"Missing {id_key} in caption file")
@@ -457,6 +460,7 @@ def load_captions(path, id_key, text_key):
     image_ids = [int(d[id_key].split('_')[-1].split('.')[0]) if 'COCO' in str(d[id_key]) else d[id_key] for d in data]
     captions = [d[text_key] for d in data]
     return captions, image_ids
+
 
 
 def save_results(output, save_dir, cap_file):
