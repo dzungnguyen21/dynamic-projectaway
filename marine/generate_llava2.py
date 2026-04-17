@@ -12,6 +12,24 @@ from marine.utils.utils_dataset import COCOEvalDataset, custom_collate_fn
 from marine.utils.utils_guidance import GuidanceLogits
 from marine.utils.utils_model import load_model
 
+# Dynamic-PROJECTAWAY (imported lazily to keep 'marine' method import-free)
+_DPA_CLASS = None
+
+def _get_dpa_class():
+    global _DPA_CLASS
+    if _DPA_CLASS is None:
+        from marine.utils.dynamic_projectaway import DynamicProjectAway
+        _DPA_CLASS = DynamicProjectAway
+    return _DPA_CLASS
+
+
+def _parse_layer_range(s: str):
+    """Parse a layer range string like '19-26' into (19, 26)."""
+    parts = s.split("-")
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError(f"Layer range must be in 'start-end' format, got: {s}")
+    return int(parts[0]), int(parts[1])
+
 
 def eval_model(args):
     
@@ -52,7 +70,40 @@ def eval_model(args):
                     max_new_tokens=args.max_new_tokens,
                     use_cache=True
                 )
+            elif args.method == "dynamic_projectaway":
+                # Build a DynamicProjectAway processor for this batch.
+                # PA vectors are extracted once per batch via a guidance forward pass.
+                dpa = _get_dpa_class()(
+                    model=model,
+                    guidance_ids=guidance_ids,
+                    guidance_images=guidance_images,
+                    guidance_attn_mask=guidance_attention_masks,
+                    input_ids=input_ids,
+                    hgai_layer_range=_parse_layer_range(args.hgai_layers),
+                    pa_layer_range=_parse_layer_range(args.pa_layers),
+                    dilution_threshold=args.dilution_threshold,
+                    hgai_amplify_factor=args.hgai_amplify_factor,
+                    sink_threshold=args.sink_threshold,
+                    guidance_strength=args.guidance_strength,
+                    tokenizer=tokenizer,
+                )
+                try:
+                    output_ids = model.generate(
+                        input_ids,
+                        pixel_values=images,
+                        do_sample=args.sampling,
+                        temperature=args.temperature,
+                        top_p=args.top_p,
+                        max_new_tokens=args.max_new_tokens,
+                        use_cache=True,
+                        logits_processor=LogitsProcessorList([dpa]),
+                    )
+                finally:
+                    # Remove hooks regardless of generation outcome to prevent
+                    # hook accumulation across batches.
+                    dpa.cleanup()
             else:
+                # Original MARINE: classifier-free guidance at logit level
                 output_ids = model.generate(
                     input_ids,
                     pixel_values=images,
@@ -124,6 +175,41 @@ if __name__ == "__main__":
     parser.add_argument("--guidance_strength", type=float, default=0.7)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--sampling", action="store_true")
+
+    # ---- Intervention method selection ----
+    parser.add_argument(
+        "--method", type=str, default="marine",
+        choices=["marine", "dynamic_projectaway"],
+        help="'marine': original CFG at logit level (default).  "
+             "'dynamic_projectaway': DPA — layer-specific hidden-state intervention."
+    )
+
+    # ---- Dynamic-PROJECTAWAY hyperparameters ----
+    parser.add_argument(
+        "--hgai_layers", type=str, default="5-18",
+        metavar="START-END",
+        help="Layer range for HGAI (Visual Information Enrichment). Default: 5-18."
+    )
+    parser.add_argument(
+        "--pa_layers", type=str, default="19-26",
+        metavar="START-END",
+        help="Layer range for PROJECTAWAY + Sink Redistribution (Semantic Refinement). "
+             "Default: 19-26."
+    )
+    parser.add_argument(
+        "--dilution_threshold", type=float, default=0.10,
+        help="VAR proxy threshold below which intervention activates (default: 0.10)."
+    )
+    parser.add_argument(
+        "--hgai_amplify_factor", type=float, default=2.0,
+        help="Consensus attention amplification factor for HGAI (default: 2.0)."
+    )
+    parser.add_argument(
+        "--sink_threshold", type=float, default=2.0,
+        help="An image patch is a sink when its attention > sink_threshold × mean "
+             "image attention (default: 2.0)."
+    )
+
     args = parser.parse_args()
 
     from transformers import set_seed
