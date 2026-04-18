@@ -350,6 +350,43 @@ class DynamicProjectAway(LogitsProcessor):
         """Alias for cleanup(), called by __del__."""
         self.cleanup()
 
+    @staticmethod
+    def _extract_first(output) -> torch.Tensor:
+        """
+        Robustly extract the first (hidden_states) element from a hook output.
+
+        In older HuggingFace (≤ 4.46) LlamaDecoderLayer returns a plain Python
+        tuple: (hidden_states, [attn_weights], [past_key_value]).
+        In newer HF that uses GradientCheckpointingLayer as the base class, the
+        decoder layer may return just the hidden_states tensor directly.
+        This helper handles both cases.
+        """
+        if isinstance(output, torch.Tensor):
+            return output
+        return output[0]
+
+    @staticmethod
+    def _rebuild_output(output, new_first: torch.Tensor):
+        """
+        Reconstruct a hook return value with `new_first` replacing element 0.
+
+        Handles three possible output types produced by different HF versions:
+          • bare Tensor   — new transformers GradientCheckpointingLayer unwrappers
+          • plain tuple   — classic (hidden_states, attn_weights, past_key_value)
+          • ModelOutput   — dataclass; convert to tuple then reconstruct
+        """
+        if isinstance(output, torch.Tensor):
+            # Bare tensor path: just return the modified tensor directly.
+            return new_first
+        if isinstance(output, tuple):
+            return (new_first,) + output[1:]
+        # ModelOutput / other sequence: convert to plain tuple first.
+        try:
+            as_tuple = tuple(output)
+            return (new_first,) + as_tuple[1:]
+        except Exception:
+            return (new_first,)
+
     # =========================================================================
     # Shared Computation: Targeted Hook Trick
     # =========================================================================
@@ -635,7 +672,7 @@ class DynamicProjectAway(LogitsProcessor):
                 )
                 correction  = module.o_proj(correction)                 # [B, S, hidden]
 
-                return (attn_out + correction,) + output[1:]
+                return self._rebuild_output(output, attn_out + correction)
 
         return hook
 
@@ -673,7 +710,7 @@ class DynamicProjectAway(LogitsProcessor):
             if hidden is None:
                 return output
 
-            attn_out = output[0]    # [B, S, hidden_dim]
+            attn_out = self._extract_first(output)    # [B, S, hidden_dim]
             bsz, seq_len, _ = hidden.shape
             nH, nKV, D = self._get_head_config(module)
             pkv = storage["pre_pkv"].get(layer_idx)
@@ -727,7 +764,7 @@ class DynamicProjectAway(LogitsProcessor):
 
                 attn_out_new                = attn_out.clone()
                 attn_out_new[:, -1:, :]    += correction
-                return (attn_out_new,) + output[1:]
+                return self._rebuild_output(output, attn_out_new)
 
         return hook
 
@@ -760,15 +797,14 @@ class DynamicProjectAway(LogitsProcessor):
             if not self.intervention_active or v is None:
                 return output
 
-            hs    = output[0]                                    # [B, S, D] or [N, D]
-            v_dev = v.to(hs.device)                              # [D]
+            hs    = self._extract_first(output)                      # [B, S, D] or bare D
+            v_dev = v.to(hs.device)                                  # [D]
 
             # h_new = h − (h · v) * v
-            # Use unsqueeze to allow safe broadcasting for ANY valid shape structure
-            proj_coeff    = (hs @ v_dev).unsqueeze(-1)           # [B, S, 1] or [N, 1]
-            hs_projected  = hs - proj_coeff * v_dev              # v_dev broadcasts to fit prefix dims seamlessly
+            proj_coeff   = (hs @ v_dev).unsqueeze(-1)                # [B, S, 1] or [N, 1]
+            hs_projected = hs - proj_coeff * v_dev                   # broadcasts cleanly
 
-            return (hs_projected,) + output[1:]
+            return self._rebuild_output(output, hs_projected)
 
         return hook
 
