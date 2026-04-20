@@ -22,7 +22,7 @@ def load_labels(label_path: str) -> List[int]:
     return [0 if item["label"] == "no" else 1 for item in label_data]
 
 
-def load_predictions(answer_path: str, model: str) -> List[int]:
+def load_predictions(answer_path: str) -> List[int]:
     with open(answer_path, 'r') as f:
         answers = [json.loads(line)["text"] for line in f]
 
@@ -78,7 +78,7 @@ def pope(args):
     print(f"== Evaluating POPE for {args.answer_file} ==")
 
     labels = load_labels(label_path)
-    preds, answers = load_predictions(answer_path, args.model)
+    preds, answers = load_predictions(answer_path)
 
     if len(labels) != len(answers):
         print(f"[ERROR] Answer count ({len(answers)}) does not match label count ({len(labels)}).")
