@@ -60,6 +60,20 @@ def eval_model(args):
     total_batches = len(eval_dataloader)
     total_samples = len(dataset)
 
+    # Initialize M3ID engine if selected
+    if args.method == "m3id_plus":
+        from marine.utils.m3id_plus import LLaVA_M3ID_Plus, GammaNet
+        gamma_net = GammaNet(hidden_dim=4096)
+        weights_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gamma_net_weights_full.pth")
+        if os.path.exists(weights_path):
+            gamma_net.load_state_dict(torch.load(weights_path))
+        else:
+            # Fallback to local execution ref
+            if os.path.exists("gamma_net_weights_full.pth"):
+                gamma_net.load_state_dict(torch.load("gamma_net_weights_full.pth"))
+                
+        engine = LLaVA_M3ID_Plus(model, processor, gamma_net)
+        
     # generate
     pbar = tqdm(eval_dataloader, total=total_batches,
                 desc=f"Generating [gs={args.guidance_strength}]",
@@ -110,6 +124,13 @@ def eval_model(args):
                     # Remove hooks regardless of generation outcome to prevent
                     # hook accumulation across batches.
                     dpa.cleanup()
+            elif args.method == "m3id_plus":
+                decoded_outputs = []
+                for i in range(len(prompts)):
+                    raw_prompt = prompts[i].replace("<image>\n", "").strip()
+                    image_path = os.path.join(args.image_folder, img_ids[i])
+                    response = engine.generate(prompt=raw_prompt, image_path=image_path, max_new_tokens=args.max_new_tokens, visualize=False)
+                    decoded_outputs.append(response)
             else:
                 # Original MARINE: classifier-free guidance at logit level
                 output_ids = model.generate(
@@ -132,9 +153,10 @@ def eval_model(args):
 
         input_token_len = input_ids.shape[1]
 
-        # Batch decode the outputs
-        decoded_outputs = tokenizer.batch_decode(
-            output_ids[:, input_token_len:], skip_special_tokens=True)
+        if args.method != "m3id_plus":
+            # Batch decode the outputs
+            decoded_outputs = tokenizer.batch_decode(
+                output_ids[:, input_token_len:], skip_special_tokens=True)
 
         samples_done += len(decoded_outputs)
         pbar.set_postfix({"samples": f"{samples_done}/{total_samples}"})
@@ -189,9 +211,10 @@ if __name__ == "__main__":
     # ---- Intervention method selection ----
     parser.add_argument(
         "--method", type=str, default="marine",
-        choices=["marine", "dynamic_projectaway"],
+        choices=["marine", "dynamic_projectaway", "m3id_plus"],
         help="'marine': original CFG at logit level (default).  "
-             "'dynamic_projectaway': DPA — layer-specific hidden-state intervention."
+             "'dynamic_projectaway': DPA — layer-specific hidden-state intervention.  "
+             "'m3id_plus': M3ID with GammaNet."
     )
 
     # ---- Dynamic-PROJECTAWAY hyperparameters ----
