@@ -1,4 +1,4 @@
-def load_model(model_name: str, model_path: str):
+def load_model(model_name: str, model_path: str, method: str = ""):
     """
     Load vision-language models and associated components based on model name.
     
@@ -14,8 +14,11 @@ def load_model(model_name: str, model_path: str):
     if model_name == "llava-1.5-7b-hf":
         from transformers import AutoProcessor, LlavaForConditionalGeneration
 
+        kwargs = {}
+        if method == "m3id_plus":
+            kwargs["attn_implementation"] = "eager"
 
-        model = LlavaForConditionalGeneration.from_pretrained(model_path).cuda()
+        model = LlavaForConditionalGeneration.from_pretrained(model_path, **kwargs).cuda()
         processor = AutoProcessor.from_pretrained(model_path)
         tokenizer = processor.tokenizer
 

@@ -38,7 +38,7 @@ def eval_model(args):
     model_path = args.model_path
     model_name = get_model_name_from_path(model_path)
     
-    model, tokenizer, processor = load_model(model_name, model_path)
+    model, tokenizer, processor = load_model(model_name, model_path, method=args.method)
 
     # QA Data
     questions = json.load(open(os.path.expanduser(
@@ -153,7 +153,7 @@ def eval_model(args):
 
         input_token_len = input_ids.shape[1]
 
-        if args.method != "m3id_plus":
+        if args.guidance_strength == 0 or args.method != "m3id_plus":
             # Batch decode the outputs
             decoded_outputs = tokenizer.batch_decode(
                 output_ids[:, input_token_len:], skip_special_tokens=True)
